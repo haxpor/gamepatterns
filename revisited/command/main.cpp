@@ -1,3 +1,16 @@
+/**
+ * Actor can be either Player or Enemey.
+ * There is fixed number of step to execute and progress the game. Whenever the game progresses
+ * and reaches such target number of steps, then the game stop and evaluate whether player wins or
+ * loses.
+ *
+ * Each step, either Player or Enemy can make a move (which can only be up/right/down/left) or
+ * decide to attack opponent. Each attack will reduce opponent's HP by 1. Whoever has HP down to 0
+ * first loses.
+ *
+ * Note:
+ *  - Command::undo() is not used just yet at the moment.
+ */
 #include <iostream>
 #include <cmath>
 #include <random>
@@ -8,8 +21,7 @@
 
 enum class ActorId {
     PLAYER = 0,
-    ENEMY,
-    BLOCKER
+    ENEMY
 };
 
 class Actor {
