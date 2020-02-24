@@ -172,6 +172,7 @@ int main() {
     // start at the upper-left corner of the grid
     int playerPosX = 0;
     int playerPosY = 0;
+    int playerMovementPoint = 340;
 
     // 0 -> up
     // 1 -> right
@@ -211,6 +212,7 @@ int main() {
         if (actionTaken) {
             const Tile& tile = world.getTile(playerPosY, playerPosX);
             costAccum += tile.getMovementCost();
+            playerMovementPoint -= tile.getMovementCost();
 
             if (tile.getType() == TileType::DESTINATION) {
                 isWin = true;
@@ -226,14 +228,21 @@ int main() {
             else if (tile.getType() == TileType::RIVER) {
                 std::cout << "\t- currently on River\n";
             }
+
+            if (playerMovementPoint <= 0) {
+                break;
+            }
         }
     }
 
     if (isWin) {
-        std::cout << "Win (cost: " << costAccum << ")\n";
+        std::cout << "Win (cost: " << costAccum << ", remaining movement point: " << playerMovementPoint << ")\n";
+    }
+    else if (playerMovementPoint <= 0) {
+        std::cout << "Lose - depleted movement point (cost: " << costAccum << ", remaining movement point: " << playerMovementPoint << ")\n";
     }
     else {
-        std::cout << "Lose (cost: " << costAccum << ")\n";
+        std::cout << "Lose - no steps left (cost: " << costAccum << ", remaining movement point: " << playerMovementPoint << ")\n";
     }
     return 0;
 }
