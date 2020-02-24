@@ -1,3 +1,8 @@
+/**
+ * The concept is player will randomly move up/right/down/left within the grid of 10x10.
+ * If player reach DESTINATION Tile, then win, otherwise either player depleted all movement point
+ * or number of limited steps allowed then lose.
+ */
 #include <iostream>
 #include <cstdint>
 #include <random>
