@@ -8,16 +8,18 @@
  * decide to attack opponent. Each attack will reduce opponent's HP by 1. Whoever has HP down to 0
  * first loses.
  *
- * Note:
- *  - Command::undo() is not used just yet at the moment.
+ * Changes
+ *  - the program accepts "-nowait" as parameter to the execution command to not wait in each loop
+ *  - undo mechanism is added and checked for correctness at the end
  */
 #include <iostream>
 #include <cmath>
 #include <random>
-#include <list>
+#include <deque>
 #include <chrono>
 #include <thread>
 #include <memory>
+#include <cassert>
 
 enum class ActorId {
     PLAYER = 0,
@@ -36,18 +38,14 @@ public:
         posY += y;
     }
 
-    int attack(Actor& target) const {
+    bool attack(Actor& target, int atkPoint) const {
         // only able to attack if in range of no more than 1 slot
         if (std::abs(target.posX - posX) > 1 ||
             std::abs(target.posY - posY) > 1)
-            return 0;
+            return false;
         
-        if (target.hp > 0) {
-            --target.hp;
-            return -1;
-        }
-
-        return 0;
+        target.hp -= atkPoint;
+        return true;
     }
 
 public:
@@ -104,83 +102,124 @@ private:
 
 class AttackCommand: public Command {
 public:
-    AttackCommand(Actor& source_, Actor& target_) {
+    AttackCommand(Actor& source_, Actor& target_, int atkPoint_) {
         source = &source_;
         target = &target_;
-        atkPoint = 0;
+        atkPoint = atkPoint_;
         id = CommandId::ATTACK;
     }
 
     void execute() override {
-        atkPoint = source->attack(*target);
+        isAttackDone = source->attack(*target, atkPoint);
     }
 
     void undo() override {
-        target->hp += atkPoint;
+        if (isAttackDone)
+           source->attack(*target, -atkPoint);     // undo the attack 
     }
 
     int getAtkPoint() const { return atkPoint; }
 
 private:
     int atkPoint;
+    bool isAttackDone;
 };
 
 template <typename T>
-void printCommandResultStatus(const T* cmd) {
+void printCommandResultStatus(const T* cmd, bool reverse) {
     // not implemented, see the specialized template functions below
 }
 
 template <>
-void printCommandResultStatus<MoveUnitCommand>(const MoveUnitCommand* cmd) {
+void printCommandResultStatus<MoveUnitCommand>(const MoveUnitCommand* cmd, bool reverse) {
     ActorId aid = static_cast<ActorId>(cmd->source->id);
     if (aid == ActorId::PLAYER) {
-        std::printf("  Player moves by\t(dx=%d, dy=%d)\tto\t(x=%d, y=%d)\n", cmd->getDx(), cmd->getDy(), cmd->source->posX, cmd->source->posY);
+        if (reverse)
+            std::printf("  Player moves by\t(dx=%d, dy=%d)\tto\t(x=%d, y=%d)\n", -cmd->getDx(), -cmd->getDy(), cmd->source->posX, cmd->source->posY);
+        else
+            std::printf("  Player moves by\t(dx=%d, dy=%d)\tto\t(x=%d, y=%d)\n", cmd->getDx(), cmd->getDy(), cmd->source->posX, cmd->source->posY);
     }
     else if (aid == ActorId::ENEMY) {
-        std::printf("  Enemy moves by \t(dx=%d, dy=%d)\tto\t(x=%d, y=%d)\n", cmd->getDx(), cmd->getDy(), cmd->source->posX, cmd->source->posY);
+        if (reverse)
+            std::printf("  Enemy moves by \t(dx=%d, dy=%d)\tto\t(x=%d, y=%d)\n", -cmd->getDx(), -cmd->getDy(), cmd->source->posX, cmd->source->posY);
+        else
+            std::printf("  Enemy moves by \t(dx=%d, dy=%d)\tto\t(x=%d, y=%d)\n", cmd->getDx(), cmd->getDy(), cmd->source->posX, cmd->source->posY);
     }
 }
 
 template <>
-void printCommandResultStatus<AttackCommand>(const AttackCommand* cmd) {
+void printCommandResultStatus<AttackCommand>(const AttackCommand* cmd, bool reverse) {
     ActorId aid = static_cast<ActorId>(cmd->source->id);
     // TODO: Assume target actor only from source actor, cover all cases...
-    if (aid == ActorId::PLAYER && cmd->getAtkPoint() < 0) {
-        std::printf("  Player attacks Enemy for\t%d hit point\n", std::abs(cmd->getAtkPoint()));
+    if (aid == ActorId::PLAYER) {
+        if (reverse)
+            std::printf("  Player undo attacks Enemy for\t%d hit point\n", std::abs(cmd->getAtkPoint()));
+        else
+            std::printf("  Player attacks Enemy for\t%d hit point\n", std::abs(cmd->getAtkPoint()));
     }
-    else if (aid == ActorId::ENEMY && cmd->getAtkPoint() < 0) {
-        std::printf("  Enemy attacks Player for\t%d hit point\n", std::abs(cmd->getAtkPoint()));
+    else if (aid == ActorId::ENEMY) {
+        if (reverse)
+            std::printf("  Enemy undo attacks Player for\t%d hit point\n", std::abs(cmd->getAtkPoint()));
+        else
+            std::printf("  Enemy attacks Player for\t%d hit point\n", std::abs(cmd->getAtkPoint()));
     }
 }
 
-void processAllCommands(std::list<std::shared_ptr<Command>>& cmdList) {
-    while (!cmdList.empty()) {
-        std::shared_ptr<Command> cmdPtr = cmdList.front();
+void processAllCommands(std::deque<std::shared_ptr<Command>>& cmdList, int& startIdx) {
+    int i = startIdx;
+    for (; i<cmdList.size(); ++i) {
+        std::shared_ptr<Command> cmdPtr = cmdList[i];
 
         cmdPtr->execute();
 
         if (cmdPtr->id == CommandId::MOVE) {
-            printCommandResultStatus<MoveUnitCommand>(static_cast<const MoveUnitCommand*>(cmdPtr.get()));              
+            printCommandResultStatus<MoveUnitCommand>(static_cast<const MoveUnitCommand*>(cmdPtr.get()), false);              
         }
         else if (cmdPtr->id == CommandId::ATTACK) {
-            printCommandResultStatus<AttackCommand>(static_cast<const AttackCommand*>(cmdPtr.get()));
+            printCommandResultStatus<AttackCommand>(static_cast<const AttackCommand*>(cmdPtr.get()), false);
         }
+    }
+    startIdx = i;
+}
 
-        cmdList.pop_front();
+void undoCommands(std::deque<std::shared_ptr<Command>>& cmdList) {
+    for (int i=cmdList.size()-1; i>=0; --i) {
+        std::shared_ptr<Command> cmdPtr = cmdList[i];
+        cmdPtr->undo();
+
+        if (cmdPtr->id == CommandId::MOVE) {
+            printCommandResultStatus<MoveUnitCommand>(static_cast<const MoveUnitCommand*>(cmdPtr.get()), true);              
+        }
+        else if (cmdPtr->id == CommandId::ATTACK) {
+            printCommandResultStatus<AttackCommand>(static_cast<const AttackCommand*>(cmdPtr.get()), true);
+        }
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    bool hasWait = true;
+    if (argc >= 2) {
+        for (int i=1; i<argc; ++i) {
+            std::string str = argv[i];
+            if (str.compare("-nowait") == 0) {
+                hasWait = false;
+                break;
+            }
+        }
+    }
+
     Actor player(ActorId::PLAYER, 3);
     Actor enemy(ActorId::ENEMY, 1);
 
-    std::list<std::shared_ptr<Command>> cmdList;
+    std::deque<std::shared_ptr<Command>> cmdList;
 
     int theoricalNumSteps = 10;
 
     std::random_device rd;
     const auto seed = rd();
     std::mt19937 mt(seed);
+
+    int cmdStartIdx = 0;
 
     std::cout << "Seed: " << seed << '\n';
 
@@ -195,7 +234,7 @@ int main() {
         // -- Enemy --
         // check for attack
         if (distBoolean(mt) && player.hp > 0) {
-            cmdList.push_back(std::move(std::make_shared<AttackCommand>(enemy, player)));
+            cmdList.push_back(std::move(std::make_shared<AttackCommand>(enemy, player, 1)));
             isEitherSideAttacked = true;
         }
         else {
@@ -218,7 +257,7 @@ int main() {
         // -- Player --
         // check for attack
         if (!isEitherSideAttacked && distBoolean(mt) && enemy.hp > 0) {
-            cmdList.push_back(std::move(std::make_shared<AttackCommand>(player, enemy)));
+            cmdList.push_back(std::move(std::make_shared<AttackCommand>(player, enemy, 1)));
         }
         // check for movement of player
         else {
@@ -237,14 +276,15 @@ int main() {
             }
         }
 
-        processAllCommands(cmdList);       
+        processAllCommands(cmdList, cmdStartIdx);       
 
         // check status
         if (player.hp <= 0 || enemy.hp <= 0)
             break;
 
-        if (step < theoricalNumSteps-1)
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (hasWait)
+            if (step < theoricalNumSteps-1)
+                std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     if (player.hp > 0 && enemy.hp <= 0) {
@@ -256,9 +296,19 @@ int main() {
     else {
         std::cout << "Lose (Player died)\n";
     }
-
     std::printf("Player: HP=%d, posX=%d, posY=%d\n", player.hp, player.posX, player.posY);
     std::printf("Enemey: HP=%d, posX=%d, posY=%d\n", enemy.hp, enemy.posX, enemy.posY);
+
+    // test undo mechanism
+    std::cout << "\nUndo testing\n";
+    undoCommands(cmdList);
+
+    assert(player.hp == 3 && "Player should have initially set hp of 3");
+    assert(enemy.hp == 1 && "Enemy should have initially set hp of 1");
+    assert(player.posX == 0 && player.posY == 0 && "Player should have position set to origin");
+    assert(enemy.posX == 0 && enemy.posY == 0 && "Enemy should have position set to origin");
+
+    std::cout << "Undo all checks passed\n";
 
     return 0;
 }
